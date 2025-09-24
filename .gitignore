@@ -3,6 +3,8 @@ Creo/out/
 
 .env
 
+Creo/oop.db
+
 # Compiled class file
 *.class
 
