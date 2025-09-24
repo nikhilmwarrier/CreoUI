@@ -17,8 +17,7 @@ public class SimpleHTTPClientUI extends JFrame {
     private final JTextArea responseBodyArea, responseHeadersArea;
     private final JList<String> historyList;
     private final DefaultListModel<String> historyListModel;
-    private final JButton aiButton;
-    private final JPanel summaryPanel;
+    private JTextPane summaryPane;
 
     // --- Data Field ---
     private List<Request> requestHistory;
@@ -26,6 +25,8 @@ public class SimpleHTTPClientUI extends JFrame {
     private final PostmanBackendService backendService;
     private final RequestsDAO requestsDAO;
     private final ResponsesDAO responsesDAO;
+
+    private HttpResponse currentResponse;
 
     public SimpleHTTPClientUI() {
         setTitle("Creo - API Client");
@@ -49,8 +50,7 @@ public class SimpleHTTPClientUI extends JFrame {
         sizeLabel = new JLabel("Size:");
         responseBodyArea = new JTextArea();
         responseHeadersArea = new JTextArea();
-        aiButton = new JButton("AI Summary");
-        summaryPanel = createSummaryPanel();
+        summaryPane = new JTextPane();
 
         setupUI();
         addListeners();
@@ -71,10 +71,8 @@ public class SimpleHTTPClientUI extends JFrame {
         // Add to frame
         add(mainSplitPane, BorderLayout.CENTER);
 
-        // Add AI button to south for now (we can move it later if needed)
-        JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        bottomPanel.add(aiButton);
-        add(bottomPanel, BorderLayout.SOUTH);
+        summaryPane.setContentType("text/html");
+        summaryPane.setEditable(false);
     }
 
     private JPanel createHistoryPanel() {
@@ -273,6 +271,7 @@ public class SimpleHTTPClientUI extends JFrame {
 
         responseTabs.addTab("Body", new JScrollPane(responseBodyArea));
         responseTabs.addTab("Headers", new JScrollPane(responseHeadersArea));
+        responseTabs.addTab("AI Summary", new JScrollPane(summaryPane));
 
         panel.add(statusPanel, BorderLayout.NORTH);
         panel.add(responseTabs, BorderLayout.CENTER);
@@ -280,49 +279,38 @@ public class SimpleHTTPClientUI extends JFrame {
         return panel;
     }
 
-    private JPanel createSummaryPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("AI Summary"));
-        panel.setVisible(false);
-
-        JTextArea summaryArea = new JTextArea("AI summary will appear here...");
-        summaryArea.setEditable(false);
-        summaryArea.setWrapStyleWord(true);
-        summaryArea.setLineWrap(true);
-        summaryArea.setRows(8);
-
-        JButton closeButton = new JButton("Close");
-        closeButton.addActionListener(e -> panel.setVisible(false));
-
-        panel.add(new JScrollPane(summaryArea), BorderLayout.CENTER);
-        panel.add(closeButton, BorderLayout.SOUTH);
-
-        return panel;
-    }
 
     private void addListeners() {
         sendButton.addActionListener(e -> onSendRequest());
         historyList.addListSelectionListener(e -> onHistorySelection(e));
-        aiButton.addActionListener(e -> {
-            if (!summaryPanel.isVisible()) {
-                // Add summary panel to a dialog or popup
-                showSummaryDialog();
-            }
-        });
     }
 
-    private void showSummaryDialog() {
-        JDialog dialog = new JDialog(this, "AI Summary", false);
-        dialog.setSize(400, 300);
-        dialog.setLocationRelativeTo(this);
-        dialog.add(summaryPanel);
-        summaryPanel.setVisible(true);
-        dialog.setVisible(true);
-    }
+
 
     private void onSendRequest() {
         sendButton.setEnabled(false);
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+
+        SwingWorker<String, Void> aiSummaryWorker = new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                AISummary summaryInstance = new AISummary(backendService);
+                String responseString = currentResponse.getBody() + "\n\nHeaders:\n" + formatResponseHeaders(currentResponse.getHeaders());
+                return summaryInstance.summarizeResponse(responseString);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    String summary = get();
+                    summaryPane.setText(summary);
+                } catch (Exception ex) {
+                    responseBodyArea.setText("Error: \n" + ex.getMessage());
+                    summaryPane.setText("Error: \n" + ex.getMessage());
+                }
+            }
+        };
+
         SwingWorker<HttpResponse, Void> worker = new SwingWorker<>() {
             @Override
             protected HttpResponse doInBackground() {
@@ -335,8 +323,10 @@ public class SimpleHTTPClientUI extends JFrame {
             @Override
             protected void done() {
                 try {
-                    updateResponseFields(get());
+                    currentResponse = get();
+                    updateResponseFields(currentResponse);
                     loadHistory();
+                    aiSummaryWorker.execute();
                 } catch (Exception ex) {
                     responseBodyArea.setText("Error: \n" + ex.getMessage());
                 } finally {
@@ -346,6 +336,7 @@ public class SimpleHTTPClientUI extends JFrame {
             }
         };
         worker.execute();
+
     }
 
     private void onHistorySelection(javax.swing.event.ListSelectionEvent e) {
