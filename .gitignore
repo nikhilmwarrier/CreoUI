@@ -1,5 +1,7 @@
 # Output dirs
-./Creo/out/*
+Creo/out/
+
+.env
 
 # Compiled class file
 *.class
